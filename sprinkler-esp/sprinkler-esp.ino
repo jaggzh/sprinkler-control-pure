@@ -1,15 +1,16 @@
 #include <ESP8266WiFi.h>
-#include <ESPAsyncWebServer.h>
+#include <ESP8266WebServer.h>
 #include <LittleFS.h>
 #include <WiFiManager.h>
 #include "httptime.h"
 #include "settings.h"
 
 #define AP_SSID "ESP_Sprinkler_Config"
-AsyncWebServer server(80);
+ESP8266WebServer server(80);
 const char *timeServers[MAX_ZONES] = {"0.0.0.0", "0.0.0.0", "0.0.0.0", "0.0.0.0", "0.0.0.0"};
 char adminPassword[32] = "";
 struct timedata currentTimeData;
+bool wm_done=false;
 
 struct Zone {
   int pin;
@@ -19,41 +20,87 @@ struct Zone {
 
 Zone zones[MAX_ZONES];
 
+void sp(const String &message) {
+  Serial.print(message);
+  Serial.flush();
+}
+
+void spl(const String &message) {
+  Serial.println(message);
+  Serial.flush();
+}
+
 void setup() {
   Serial.begin(115200);
   delay(100);
 
   // Initialize LittleFS
   if (!LittleFS.begin()) {
-    Serial.println("LittleFS mount failed, formatting...");
+    spl("LittleFS mount failed, formatting...");
     if (!LittleFS.format() || !LittleFS.begin()) {
-      Serial.println("LittleFS format failed");
+      spl("LittleFS format failed");
       return;
     }
   }
-  Serial.println("LittleFS initialized");
-
-  // Initialize zones
-  for (int i = 0; i < MAX_ZONES; i++) {
-    zones[i].pin = i + 2; // Example pin assignment
-    pinMode(zones[i].pin, OUTPUT);
-    digitalWrite(zones[i].pin, LOW);
-    zones[i].endTime = 0;
-    zones[i].isOn = false;
-  }
+  spl("LittleFS initialized");
 
   // Load configuration from LittleFS
   loadNetworkConfiguration();
 
-  // WiFiManager for first-time WiFi Configuration
+  // Check if network configuration is already saved
+  String savedSSID = readFromFile("/net-ssid");
+  String savedPassword = readFromFile("/net-ssidpw");
+  if (savedSSID.length() > 0 && savedPassword.length() > 0) {
+    // If credentials are saved, connect directly
+    spl("Connecting to saved WiFi...");
+    WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
+
+    // Wait for connection
+    unsigned long startAttemptTime = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 10000) {
+      delay(100);
+      yield();
+      sp(".");
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      spl("\nConnected to WiFi");
+      wm_done = true;
+    } else {
+      spl("\nFailed to connect to saved WiFi, starting WiFiManager");
   WiFiManager wm;
   if (!wm.autoConnect(AP_SSID)) {
-    Serial.println("Failed to connect to WiFi. Restarting...");
+        spl("Failed to connect to WiFi. Restarting...");
     delay(3000);
     ESP.restart();
   }
-  Serial.println("Connected to WiFi");
   saveNetworkConfiguration();
+      wm_done = true;
+    }
+  } else {
+    // If no credentials are saved, use WiFiManager
+    spl("No saved WiFi credentials, starting WiFiManager");
+    WiFiManager wm;
+    if (!wm.autoConnect(AP_SSID)) {
+      spl("Failed to connect to WiFi. Restarting...");
+      delay(3000);
+      ESP.restart();
+    }
+    saveNetworkConfiguration();
+    wm_done = true;
+  }
+
+  // Initialize zones only after WiFi is configured
+  if (wm_done) {
+    for (int i = 0; i < MAX_ZONES; i++) {
+      zones[i].pin = i + 2; // Example pin assignment
+      pinMode(zones[i].pin, OUTPUT);
+      digitalWrite(zones[i].pin, LOW);
+      zones[i].endTime = 0;
+      zones[i].isOn = false;
+    }
+    spl("Zones initialized");
+  }
 
   // Setup web server routes
   server.on("/", HTTP_GET, handleRootPage);
@@ -64,7 +111,7 @@ void setup() {
   server.on("/config_net", HTTP_GET, handleConfigNet);
 
   server.begin();
-  Serial.println("Web server started");
+  spl("Web server started");
 
   // Time update from HTTP
   update_time_from_server();
@@ -73,7 +120,7 @@ void setup() {
 void saveToFile(const char* filename, const String& value) {
   File file = LittleFS.open(filename, "w");
   if (!file) {
-    Serial.println("Failed to open file for writing: " + String(filename));
+    spl("Failed to open file for writing: " + String(filename));
     return;
   }
   file.print(value);
@@ -83,7 +130,7 @@ void saveToFile(const char* filename, const String& value) {
 String readFromFile(const char* filename) {
   File file = LittleFS.open(filename, "r");
   if (!file) {
-    Serial.println("Failed to open file for reading: " + String(filename));
+    spl("Failed to open file for reading: " + String(filename));
     return "";
   }
   String value = file.readString();
@@ -107,7 +154,7 @@ void loadNetworkConfiguration() {
   String password = readFromFile("/net-ssidpw");
   if (ssid.length() > 0 && password.length() > 0) {
     WiFi.begin(ssid.c_str(), password.c_str());
-    Serial.println("Loaded WiFi credentials from storage.");
+    spl("Loaded WiFi credentials from storage.");
   }
 
   String ip = readFromFile("/net-ip");
@@ -119,7 +166,7 @@ void loadNetworkConfiguration() {
     gateway.fromString(gw);
     subnet.fromString(mask);
     WiFi.config(localIP, gateway, subnet);
-    Serial.println("Loaded network configuration from storage.");
+    spl("Loaded network configuration from storage.");
   }
 
   for (int i = 0; i < 5; i++) {
@@ -130,124 +177,121 @@ void loadNetworkConfiguration() {
   }
 }
 
-void handleRootPage(AsyncWebServerRequest *request) {
-  request->send(200, "text/html", "");
-  request->sendContent(F("<html>Sprinkler Main<br>"));
-  request->sendContent(F("Uptime: ") + String(millis() / 1000) + F(" seconds<br>"));
+void handleRootPage() {
+  String content = "<html>Sprinkler Main<br>";
+  content += "Uptime: " + String(millis() / 1000) + " seconds<br>";
   for (int i = 0; i < MAX_ZONES; i++) {
-    request->sendContent(F("Zone ") + String(i) + F("<br>"));
-    request->sendContent(F("<form action='/on' method='GET'>"));
-    request->sendContent(F("<input type='hidden' name='zone' value='") + String(i) + F("'>"));
-    request->sendContent(F("<input type='text' name='duration' value='30'> <input type='submit' value='On'>"));
-    request->sendContent(F("</form>"));
-    request->sendContent(F("<form action='/off' method='GET'>"));
-    request->sendContent(F("<input type='hidden' name='zone' value='") + String(i) + F("'>"));
-    request->sendContent(F("<input type='submit' value='Off'>"));
-    request->sendContent(F("</form><br>"));
+    content += "Zone " + String(i) + "<br>";
+    content += "<form action='/on' method='GET'>";
+    content += "<input type='hidden' name='zone' value='" + String(i) + "'>";
+    content += "<input type='text' name='duration' value='30'> <input type='submit' value='On'>";
+    content += "</form>";
+    content += "<form action='/off' method='GET'>";
+    content += "<input type='hidden' name='zone' value='" + String(i) + "'>";
+    content += "<input type='submit' value='Off'>";
+    content += "</form><br>";
   }
-  request->sendContent(F("<a href='/reboot'>Reboot link</a><br>"));
-  request->sendContent(F("<a href='/ota'>Flash OTA</a></html>"));
+  content += "<a href='/reboot'>Reboot link</a><br>";
+  content += "<a href='/ota'>Flash OTA</a></html>";
+  server.send(200, "text/html", content);
 }
 
-void handleZoneOn(AsyncWebServerRequest *request) {
-  if (request->hasParam("zone") && request->hasParam("duration")) {
-    int zone = request->getParam("zone")->value().toInt();
-    unsigned long duration = request->getParam("duration")->value().toInt() * 1000;
+void handleZoneOn() {
+  if (server.hasArg("zone") && server.hasArg("duration")) {
+    int zone = server.arg("zone").toInt();
+    unsigned long duration = server.arg("duration").toInt() * 1000;
     if (zone >= 0 && zone < MAX_ZONES && duration > 0) {
       zones[zone].isOn = true;
       zones[zone].endTime = millis() + duration;
       digitalWrite(zones[zone].pin, HIGH);
-      request->send(200, "text/html", "Updated. Redirecting...");
-      request->sendContent(F("<meta http-equiv='refresh' content='3; url=/' />"));
+      server.send(200, "text/html", "Updated. Redirecting...<meta http-equiv='refresh' content='3; url=/' />");
     } else {
-      request->send(400, "text/plain", "Invalid zone or duration");
+      server.send(400, "text/plain", "Invalid zone or duration");
     }
   } else {
-    request->send(400, "text/plain", "Missing parameters");
+    server.send(400, "text/plain", "Missing parameters");
   }
 }
 
-void handleZoneOff(AsyncWebServerRequest *request) {
-  if (request->hasParam("zone")) {
-    int zone = request->getParam("zone")->value().toInt();
+void handleZoneOff() {
+  if (server.hasArg("zone")) {
+    int zone = server.arg("zone").toInt();
     if (zone >= 0 && zone < MAX_ZONES) {
       zones[zone].isOn = false;
       digitalWrite(zones[zone].pin, LOW);
-      request->send(200, "text/html", "Updated. Redirecting...");
-      request->sendContent(F("<meta http-equiv='refresh' content='3; url=/' />"));
+      server.send(200, "text/html", "Updated. Redirecting...<meta http-equiv='refresh' content='3; url=/' />");
     } else {
-      request->send(400, "text/plain", "Invalid zone");
+      server.send(400, "text/plain", "Invalid zone");
     }
   } else {
-    request->send(400, "text/plain", "Missing parameters");
+    server.send(400, "text/plain", "Missing parameters");
   }
 }
 
-void handleReboot(AsyncWebServerRequest *request) {
-  request->send(200, "text/plain", "Rebooting...");
-  request->send(200, "text/html", "<html>Configuration saved. Please reboot manually from the homepage.<br><a href='/'>Return to Home</a></html>");
+void handleReboot() {
+  server.send(200, "text/plain", "Rebooting...");
+  delay(1000);
+  ESP.restart();
 }
 
-void handleConfigPage(AsyncWebServerRequest *request) {
-  if (request->hasParam("pw")) {
-    String providedPassword = request->getParam("pw")->value();
+void handleConfigPage() {
+  if (server.hasArg("pw")) {
+    String providedPassword = server.arg("pw");
     if (strcmp(adminPassword, providedPassword.c_str()) == 0) {
-      request->send(200, "text/html", "");
-      request->sendContent(F("<html><form action='/config_net' method='GET'>"));
-      request->sendContent(F("SSID: <input type='text' name='ssid' value='") + WiFi.SSID() + F("'><br>"));
-      request->sendContent(F("SSID PW: <input type='password' name='ssid_pw' value='***'><br>"));
-      request->sendContent(F("IP: <input type='text' name='ip' value='") + WiFi.localIP().toString() + F("'><br>"));
-      request->sendContent(F("GW: <input type='text' name='gw' value='") + WiFi.gatewayIP().toString() + F("'><br>"));
-      request->sendContent(F("Mask: <input type='text' name='mask' value='") + WiFi.subnetMask().toString() + F("'><br>"));
+      String content = "<html><form action='/config_net' method='GET'>";
+      content += "SSID: <input type='text' name='ssid' value='" + WiFi.SSID() + "'><br>";
+      content += "SSID PW: <input type='password' name='ssid_pw' value='***'><br>";
+      content += "IP: <input type='text' name='ip' value='" + WiFi.localIP().toString() + "'><br>";
+      content += "GW: <input type='text' name='gw' value='" + WiFi.gatewayIP().toString() + "'><br>";
+      content += "Mask: <input type='text' name='mask' value='" + WiFi.subnetMask().toString() + "'><br>";
       for (int i = 0; i < 5; i++) {
-        request->sendContent(F("Time server IP ") + String(i) + F(": <input type='text' name='time_server_") + String(i) + F("' value='") + String(timeServers[i]) + F("'><br>"));
+        content += "Time server IP " + String(i) + ": <input type='text' name='time_server_" + String(i) + "' value='" + String(timeServers[i]) + "'><br>";
       }
-      request->sendContent(F("<input type='submit' value='Submit'>"));
-      request->sendContent(F("</form></html>"));
+      content += "<input type='submit' value='Submit'>";
+      content += "</form></html>";
+      server.send(200, "text/html", content);
     } else {
-      request->send(401, "text/plain", "Unauthorized");
+      server.send(401, "text/plain", "Unauthorized");
     }
   } else {
-    request->send(400, "text/plain", "Password required");
+    server.send(400, "text/plain", "Password required");
   }
 }
 
-void handleConfigNet(AsyncWebServerRequest *request) {
-  if (request->hasParam("ssid") && request->hasParam("ssid_pw") && request->hasParam("ip") && request->hasParam("gw") && request->hasParam("mask")) {
-    String ssid = request->getParam("ssid")->value();
-    String ssidPw = request->getParam("ssid_pw")->value();
+void handleConfigNet() {
+  if (server.hasArg("ssid") && server.hasArg("ssid_pw") && server.hasArg("ip") && server.hasArg("gw") && server.hasArg("mask")) {
+    String ssid = server.arg("ssid");
+    String ssidPw = server.arg("ssid_pw");
     if (ssidPw == "***") {
-      request->send(400, "text/plain", "Invalid password");
+      server.send(400, "text/plain", "Invalid password");
       return;
     }
-    String ip = request->getParam("ip")->value();
-    String gw = request->getParam("gw")->value();
-    String mask = request->getParam("mask")->value();
+    String ip = server.arg("ip");
+    String gw = server.arg("gw");
+    String mask = server.arg("mask");
 
     for (int i = 0; i < 5; i++) {
       String paramName = "time_server_" + String(i);
-      if (request->hasParam(paramName)) {
-        timeServers[i] = request->getParam(paramName)->value().c_str();
+      if (server.hasArg(paramName)) {
+        timeServers[i] = server.arg(paramName).c_str();
       }
     }
 
     // Save the new network configuration to LittleFS
     saveNetworkConfiguration();
 
-    request->send(200, "text/html", "Updated. Redirecting...");
-    request->sendContent(F("<meta http-equiv='refresh' content='3; url=/' />"));
-    request->send(200, "text/html", "<html>Configuration saved. Please reboot manually from the homepage.<br><a href='/'>Return to Home</a></html>");
+    server.send(200, "text/html", "Updated. Redirecting...<meta http-equiv='refresh' content='3; url=/' />");
   } else {
-    request->send(400, "text/plain", "All fields are required");
+    server.send(400, "text/plain", "All fields are required");
   }
 }
 
 void update_time_from_server() {
   int result = get_http_time(&currentTimeData, timeServers, MAX_ZONES, 80);
   if (result == 0) {
-    Serial.println("Time updated successfully");
+    spl("Time updated successfully");
   } else {
-    Serial.println("Failed to update time");
+    spl("Failed to update time");
   }
 }
 
@@ -256,11 +300,16 @@ void loop() {
   static unsigned long lastTimeUpdate = 0;
   static unsigned long lastZoneCheck = 0;
 
+  if (!wm_done) {
+    // WiFiManager setup not done, skip the loop
+    return;
+  }
+
   // Check WiFi every NET_TEST_S seconds
   if (millis() - lastNetworkCheck >= NET_TEST_S * 1000) {
     lastNetworkCheck = millis();
     if (WiFi.status() != WL_CONNECTED) {
-      Serial.println("Attempting to reconnect to WiFi...");
+      spl("Attempting to reconnect to WiFi...");
       WiFi.reconnect();
     }
   }
@@ -278,7 +327,7 @@ void loop() {
       if (zones[i].isOn && millis() >= zones[i].endTime) {
         zones[i].isOn = false;
         digitalWrite(zones[i].pin, LOW);
-        Serial.println("Zone " + String(i) + " turned off");
+        spl("Zone " + String(i) + " turned off");
       }
     }
   }
