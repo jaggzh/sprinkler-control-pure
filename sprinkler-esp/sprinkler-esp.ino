@@ -40,9 +40,20 @@ void spl(const String &message) {
   Serial.flush();
 }
 
+void initZonesInMem() {
+  for (int i = 0; i < MAX_ZONES; i++) {
+    zones[i].pin = -1;  // Invalid pin to indicate no configuration
+    zones[i].endTime = 0;
+    zones[i].isOn = false;
+    zones[i].name = "";
+  }
+}
+
+
 void setup() {
   Serial.begin(115200);
   delay(100);
+  initZonesInMem();
 
   // Initialize LittleFS
   /* LittleFS.format(); */
@@ -212,8 +223,6 @@ void saveNetworkConfiguration() {
 }
 
 void handleStoreConfig() {
-  bool success = true;
-
   // Save network settings if they are passed
   if (server.hasArg("ssid") && server.hasArg("ssid_pw") && server.hasArg("ip") && server.hasArg("gw") && server.hasArg("mask")) {
     String ssid = server.arg("ssid");
@@ -268,14 +277,13 @@ void handleStoreConfig() {
     }
   }
 
-  // Respond to client with success message and redirect to main page
   redir_plain();
 }
 
 void handleWipeZones() {
   for (int i = 0; i < MAX_ZONES; i++) {
-    String pinFile = "/zone" + String(i) + "-pin";
-    String nameFile = "/zone" + String(i) + "-name";
+    String pinFile = "/zone" + String(i) + "_pin";
+    String nameFile = "/zone" + String(i) + "_name";
     if (LittleFS.exists(pinFile)) {
       LittleFS.remove(pinFile);
       spl("Removed " + pinFile);
@@ -285,6 +293,7 @@ void handleWipeZones() {
       spl("Removed " + nameFile);
     }
   }
+  initZonesInMem();
   redir_plain();
 }
 
@@ -327,25 +336,32 @@ void loadZoneConfiguration() {
       spl("Loaded zone " + String(i) + " with pin " + String(zones[i].pin));
     } else {
       zones[i].pin = -1;  // Invalid pin to indicate no configuration
+      zones[i].name = "";
+      zones[i].isOn = false;
+      zones[i].endTime = 0;
     }
   }
 }
 
 void handleConfigZones() {
-  String content = "<html><form action='/store' method='GET'>";
-  content += "<h3>Configure Sprinkler Zones</h3>";
-  content += "<h4>Pin ref:</h4>";
-  content += "<b>&nbsp; <b>I2C:</b> D1:5, D2:4<br />";
-  content += "<b>&nbsp; <b>Preferred:</b> D4:2 (led), D5:14, D6:12, D7:13<br />";
-  content += "<h4>Zone config</h4>";
+  String content =
+    "<html><head><link rel=\"stylesheet\" href=\"/s.css\"></head><body>"
+    "<form action='/store' method='GET'>"
+    "<h3>Configure Sprinkler Zones</h3>"
+    "* Pin = -1 means zone unassigned"
+    "<h4>Pin ref:</h4>"
+    "<b>&nbsp; <b>I2C:</b> D1:5, D2:4<br />"
+    "<b>&nbsp; <b>Preferred:</b> D4:2 (led), D5:14, D6:12, D7:13<br />"
+    "<h4>Zone config</h4>";
   for (int i = 0; i < MAX_ZONES; i++) {
     content += "Zone " + String(i) + " Pin: <input type='text' name='zone" + String(i) + "_pin' value='" + String(zones[i].pin != -1 ? zones[i].pin : 0) + "'><br>";
     content += "Zone " + String(i) + " Name: <input type='text' name='zone" + String(i) + "_name' value='" + zones[i].name + "'><br><br>";
   }
-  content += "<input type='submit' value='Save Zones'>";
-  content += "</form>
-  content += "<a href='/wipe_zones'>Wipe Zones</a>";
-  content += "</html>";
+  content +=
+    "<input type='submit' value='Save Zones'>"
+    "</form>"
+    "<a href='/wipe_zones'>Wipe Zones</a>"
+    "</html>";
   server.send(200, "text/html", content);
 }
 
@@ -361,26 +377,32 @@ server.sendContent("HTTP/1.0 200 OK\r\n");
 server.sendContent("Content-Type: text/html; charset=utf-8\r\n\r\n");
   server.sendContent(F(
     "<html><head><link rel=\"stylesheet\" href=\"/s.css\"></head><body>"
-    "<h3>Sprinkler Main</h3>"));
-  server.sendContent(F("Uptime: ")); 
+    "<h3>Sprinkler Main</h3>"
+    "Uptime: "
+  )); 
   server.sendContent(String(millis() / 1000) + " seconds<br>");
   for (int i = 0; i < MAX_ZONES; i++) {
     if (zones[i].pin != -1) {
       server.sendContent(F("Zone ") + zones[i].name + F("<br>"));
       server.sendContent(F("<form class=noblock action='/on' method='GET'>"));
       server.sendContent(F("<input type='hidden' name='zone' value='") + String(i) + F("'>"));
-      server.sendContent(F("<input class='num' type='text' name='duration' value='30'> <input type='submit' value='On'>"));
-      server.sendContent(F("</form>"));
-      server.sendContent(F("<form class=noblock action='/off' method='GET'>"));
+      server.sendContent(F(
+        "<input class='num' type='text' name='duration' value='30'> <input type='submit' value='On'>"
+        "</form>"
+        "<form class=noblock action='/off' method='GET'>"));
       server.sendContent(F("<input type='hidden' name='zone' value='") + String(i) + F("'>"));
-      server.sendContent(F("<input type='submit' value='Off'>"));
-      server.sendContent(F("</form><br>"));
+      server.sendContent(F(
+        "<input type='submit' value='Off'>"
+        "</form><br>"
+      ));
     }
   }
-  server.sendContent(F("<a href='/config_zones'>Configure Zones</a><br>"));
-  server.sendContent(F("<a href='/config'>Network Settings</a><br>"));
-  server.sendContent(F("<a href='/reboot'>Reboot link</a><br>"));
-  server.sendContent(F("<a href='/ota'>Flash OTA</a></html>"));
+  server.sendContent(F(
+    "<a href='/config_zones'>Configure Zones</a><br>"
+    "<a href='/config'>Network Settings</a><br>"
+    "<a href='/reboot'>Reboot link</a><br>"
+    "<a href='/ota'>Flash OTA</a></html>"
+  ));
 }
 
 void redir_plain() {
