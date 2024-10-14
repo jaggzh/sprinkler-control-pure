@@ -30,6 +30,10 @@ WiFiManagerParameter custom_ip("ip", "Static IP", static_ip, 16);
 WiFiManagerParameter custom_gw("gw", "Gateway", static_gw, 16);
 WiFiManagerParameter custom_sn("sn", "Subnet Mask", static_sn, 16);
 
+#define svc(s) server.sendContent(s)
+void http200() { svc("HTTP/1.0 200 OK\r\n"); }
+void mimehtml() { http200(); svc("Content-Type: text/html; charset=utf-8\r\n\r\n"); }
+
 void sp(const String &s) { Serial.print(s); Serial.flush(); }
 void sp(int v) { Serial.print(v); Serial.flush(); }
 void spl(const String &s) { Serial.println(s); Serial.flush(); }
@@ -347,7 +351,8 @@ void loadZoneConfiguration() {
 }
 
 void handleConfigZones() {
-  String content =
+  mimehtml();
+  svc(F(
     "<html><head><link rel=\"stylesheet\" href=\"/s.css\"></head><body>"
     "<form action='/store' method='GET'>"
     "<h3>Configure Sprinkler Zones</h3>"
@@ -355,52 +360,70 @@ void handleConfigZones() {
     "<h4>Pin ref:</h4>"
     "<b>&nbsp; <b>I2C:</b> D1:5, D2:4<br />"
     "<b>&nbsp; <b>Preferred:</b> D4:2 (led), D5:14, D6:12, D7:13<br />"
-    "<h4>Zone config</h4>";
+    "<h4>Zone config</h4>"));
   for (int i = 0; i < MAX_ZONES; i++) {
-    content += "Zone " + String(i) + " Pin: <input type='text' name='zone" + String(i) + "_pin' value='" + String(zones[i].pin != -1 ? zones[i].pin : 0) + "'><br>";
-    content += "Zone " + String(i) + " Name: <input type='text' name='zone" + String(i) + "_name' value='" + zones[i].name + "'><br><br>";
+    svc(
+      "<div class=zconf><h5>Zone " + String(i) + "</h5>\n"
+       "<div>Pin: <input type='text' name='zone" + String(i) + "_pin' value='" + String(zones[i].pin) + "'></div>"
+       "<div>Name: <input type='text' name='zone" + String(i) + "_name' value='" + zones[i].name + "'></div>"
+       "<div>Presets:"
+        "<div class=presets>\n"
+       );
+    // This zone Presets row contents:
+    // 'zone#_pset#'
+    for (int j = 0; j < MAX_ZONE_PRESETS; j++) {
+      svc("<input type='text' name='zone" + String(i) + "_pset" + String(j) + "' value='" + String(zones[i].preset[j]) + "'>\n");
+    }
+    svc(
+        "</div>" // presets row
+       "</div>" // presets section
+      "</div>" // zone
+    );
   }
-  content +=
+  svc(
     "<input type='submit' value='Save Zones'>"
     "</form>"
     "<a href='/wipe_zones'>Wipe Zones</a>"
-    "</html>";
-  server.send(200, "text/html", content);
+    "</html>"
+  );
 }
 
 void handleCSS() {
   server.send(200, "text/css", F(
     ".num{ width: 6em; }"
     ".noblock { display: inline-block; margin-right: .5em; }"
+    "h3,h4,h5 { margin: .5em 0 .4em 0; }"
+    ".zconf { padding-left: 2em; }"
+    ".zconf div { margin: .1em 0 .1em 0; }"
   ));
 }
 
 void handleRootPage() {
-server.sendContent("HTTP/1.0 200 OK\r\n");
-server.sendContent("Content-Type: text/html; charset=utf-8\r\n\r\n");
-  server.sendContent(F(
+svc("HTTP/1.0 200 OK\r\n");
+svc("Content-Type: text/html; charset=utf-8\r\n\r\n");
+  svc(F(
     "<html><head><link rel=\"stylesheet\" href=\"/s.css\"></head><body>"
     "<h3>Sprinkler Main</h3>"
     "Uptime: "
   )); 
-  server.sendContent(String(millis() / 1000) + " seconds<br>");
+  svc(String(millis() / 1000) + " seconds<br>");
   for (int i = 0; i < MAX_ZONES; i++) {
     if (zones[i].pin != -1) {
-      server.sendContent(F("Zone ") + zones[i].name + F("<br>"));
-      server.sendContent(F("<form class=noblock action='/on' method='GET'>"));
-      server.sendContent(F("<input type='hidden' name='zone' value='") + String(i) + F("'>"));
-      server.sendContent(F(
+      svc(F("Zone ") + zones[i].name + F("<br>"));
+      svc(F("<form class=noblock action='/on' method='GET'>"));
+      svc(F("<input type='hidden' name='zone' value='") + String(i) + F("'>"));
+      svc(F(
         "<input class='num' type='text' name='duration' value='30'> <input type='submit' value='On'>"
         "</form>"
         "<form class=noblock action='/off' method='GET'>"));
-      server.sendContent(F("<input type='hidden' name='zone' value='") + String(i) + F("'>"));
-      server.sendContent(F(
+      svc(F("<input type='hidden' name='zone' value='") + String(i) + F("'>"));
+      svc(F(
         "<input type='submit' value='Off'>"
         "</form><br>"
       ));
     }
   }
-  server.sendContent(F(
+  svc(F(
     "<a href='/config_zones'>Configure Zones</a><br>"
     "<a href='/config'>Network Settings</a><br>"
     "<a href='/reboot'>Reboot link</a><br>"
@@ -455,17 +478,19 @@ void handleConfigPage() {
   if (server.hasArg("pw")) {
     String providedPassword = server.arg("pw");
     if (strcmp(adminPassword, providedPassword.c_str()) == 0) {
-      String content = "<html><form action='/config_net' method='GET'>";
-      content += "SSID: <input type='text' name='ssid' value='" + WiFi.SSID() + "'><br>";
-      content += "SSID PW: <input type='password' name='ssid_pw' value='***'><br>";
-      content += "IP: <input type='text' name='ip' value='" + WiFi.localIP().toString() + "'><br>";
-      content += "GW: <input type='text' name='gw' value='" + WiFi.gatewayIP().toString() + "'><br>";
-      content += "Mask: <input type='text' name='mask' value='" + WiFi.subnetMask().toString() + "'><br>";
+      String content =
+        "<html><form action='/config_net' method='GET'>\n" +
+        "SSID: <input type='text' name='ssid' value='" + WiFi.SSID() + "'><br>" +
+        "SSID PW: <input type='password' name='ssid_pw' value='***'><br>" +
+        "IP: <input type='text' name='ip' value='" + WiFi.localIP().toString() + "'><br>" +
+        "GW: <input type='text' name='gw' value='" + WiFi.gatewayIP().toString() + "'><br>" +
+        "Mask: <input type='text' name='mask' value='" + WiFi.subnetMask().toString() + "'><br>\n";
       for (int i = 0; i < 5; i++) {
         content += "Time server IP " + String(i) + ": <input type='text' name='time_server_" + String(i) + "' value='" + String(timeServers[i]) + "'><br>";
       }
-      content += "<input type='submit' value='Submit'>";
-      content += "</form></html>";
+      content +=
+        "<input type='submit' value='Submit'>" +
+        "</form></html>";
       server.send(200, "text/html", content);
     } else {
       server.send(401, "text/plain", "Unauthorized");
