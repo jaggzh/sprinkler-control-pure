@@ -30,15 +30,10 @@ WiFiManagerParameter custom_ip("ip", "Static IP", static_ip, 16);
 WiFiManagerParameter custom_gw("gw", "Gateway", static_gw, 16);
 WiFiManagerParameter custom_sn("sn", "Subnet Mask", static_sn, 16);
 
-void sp(const String &message) {
-  Serial.print(message);
-  Serial.flush();
-}
-
-void spl(const String &message) {
-  Serial.println(message);
-  Serial.flush();
-}
+void sp(const String &s) { Serial.print(s); Serial.flush(); }
+void sp(int v) { Serial.print(v); Serial.flush(); }
+void spl(const String &s) { Serial.println(s); Serial.flush(); }
+void spl(int v) { Serial.println(v); Serial.flush(); }
 
 void initZonesInMem() {
   for (int i = 0; i < MAX_ZONES; i++) {
@@ -80,7 +75,7 @@ void setup() {
   if (savedSSID.length() > 0 && savedPassword.length() > 0) {
     // If credentials are saved, apply static IP if available and connect directly
     sp("Connecting to saved WiFi: ");
-    sp(savedSSID);
+    spl(savedSSID);
     if (savedIP.length() > 0 && savedGW.length() > 0 && savedMask.length() > 0) {
       // Convert the saved strings to IPAddress objects
       IPAddress localIP, gateway, subnet;
@@ -91,7 +86,7 @@ void setup() {
       // Configure WiFi to use static IP
       WiFi.config(localIP, gateway, subnet);
 
-      sp(" with static IP: ");
+      sp(" Static IP: ");
       sp(savedIP);
       sp(", Gateway: ");
       sp(savedGW);
@@ -330,6 +325,13 @@ void loadZoneConfiguration() {
   for (int i = 0; i < MAX_ZONES; i++) {
     String pinValue = readFromFile(("/zone" + String(i) + "-pin").c_str());
     String nameValue = readFromFile(("/zone" + String(i) + "-name").c_str());
+    sp("Reading zone ");
+    sp(i);
+    sp("... ");
+    sp("pinValue:");
+    sp(pinValue);
+    sp(" nameValue:");
+    spl(nameValue);
     if (pinValue.length() > 0) {
       zones[i].pin = pinValue.toInt();
       zones[i].name = nameValue.length() > 0 ? nameValue : "Zone " + String(i);
@@ -339,6 +341,7 @@ void loadZoneConfiguration() {
       zones[i].name = "";
       zones[i].isOn = false;
       zones[i].endTime = 0;
+      spl("Set zone " + String(i) + " to -1");
     }
   }
 }
