@@ -70,22 +70,17 @@ Web server:
 			Zones:
 				* Each sprinkler zone has preset seconds for convenience buttons
 				[Sprinkler Control Name] {Set (this is a button)}
-				[pin0 #] [Zone 0 name] {Set}
-					[pin0 seconds0]
-					[pin0 seconds1]
-					[pin0 seconds2]
-					[pin0 seconds3]
-					[pin0 seconds4]
+				[Zone 0 Pin #] [Zone 0 name] {Set}
+					[zone 0 preset0 seconds]
+					...
+					[zone 0 presetN seconds] (up to MAX_ZONE_PRESETS)
 					{Set}
-				[pin1 #] [Zone 1 name] {Set}
-					[pin0 seconds0]
-					[pin0 seconds1]
-					[pin0 seconds2]
-					[pin0 seconds3]
-					[pin0 seconds4]
+				...
+				[Zone M Pin #] [Zone N name] {Set}
+					[zone M preset0 seconds]
+					...
+					[zone M presetN seconds] (up to MAX_ZONE_PRESETS)
 					{Set}
-				..
-				[pin{MAX_ZONES-1} #] [Zone 10 name] {Set}
 			Set admin pw: [Admin password] {Store}
 		/store?
 			Used for storage of any passed settings
@@ -106,4 +101,5 @@ settings.h:
 	#define NET_TEST_S (60*2)   // secs between network/wifi tests for reconnect
 	#define TIME_RETR_S (60*5)  // secs between time update retrievals
 	#define MAX_ZONES 8         // Count of zones we allow and offer
+	#define MAX_ZONE_PRESETS 5  // Count of preset buttons (seconds on-time) per zone.
 
