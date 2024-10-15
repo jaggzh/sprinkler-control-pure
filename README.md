@@ -2,8 +2,8 @@
 
 ### *Disclaimers
 
-    * *I just got this project to the point of its main functions, and put it to use!*
-    * I had ChatGPT write this README and I've only given it a cursory review and one or two ChatGPT revisions. :)
+* *I just got this project to the point of its main functions, and put it to use!*
+* I had ChatGPT write this README and I've only given it a cursory review and one or two ChatGPT revisions. :)
 
 ## Overview
 
