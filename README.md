@@ -7,6 +7,8 @@
 
 ## Overview
 
+![A field being sprinklered, controlled by an MCU/ESP8266 control box.](i/jaggzh-sprinkler-field-mcu.jpg)
+
 This project is an **Arduino+ESP8266-based** sprinkler controller that allows you to manage multiple irrigation zones using a simple, web-based interface. Unlike other solutions that require external services like Home Assistant or complex smart home integrations, this project keeps things **local** and **simple**:
 
 - **No reliance on external platforms**—it works entirely over your home network.
