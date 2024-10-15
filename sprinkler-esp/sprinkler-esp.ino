@@ -11,8 +11,8 @@ const char *timeServers[MAX_ZONES] = {"0.0.0.0", "0.0.0.0", "0.0.0.0", "0.0.0.0"
 char adminPassword[32] = "";
 struct timedata currentTimeData;
 bool wm_done=false;
-#define RELAY_ON_STATE  LOW
-#define RELAY_OFF_STATE HIGH
+#define RELAY_ON_STATE  HIGH
+#define RELAY_OFF_STATE LOW
 
 struct Zone {
   int pin;
@@ -416,13 +416,17 @@ void handleConfigZones() {
   svc(
     "<input type='submit' value='Save Zones'>"
     "</form>"
-    "<p><a href='/wipe_zones'>Wipe Zones</a></p>"
+    "<p><br /><a href='/wipe_zones'>Wipe Zones</a></p>"
     "</html>"
   );
 }
 
 void handleCSS() {
   server.send(200, "text/css", F(
+    "@media (max-width: 1081px) {"
+      "body { font-size: 275%; }"
+      "input, button { font-size: 1em; }"
+    "}"
     ".num{ width: 6em; }"
     ".noblock { display: inline-block; margin-right: .5em; }"
     "h3,h4,h5 { margin: .5em 0 .4em 0; }"
@@ -430,12 +434,14 @@ void handleCSS() {
     ".zconf div { margin: .1em 0 .1em 0; }"
     ".zconf div { margin: .1em 0 .1em 0; }"
     ".zconf input { width: 5em; }"
+    ".stat { padding: .2em .5em .2em .5em; }"
+    ".on { background: red; color: white; }"
+    ".off { background: #aaa; color: black; }"
   ));
 }
 
 void handleRootPage() {
-svc("HTTP/1.0 200 OK\r\n");
-svc("Content-Type: text/html; charset=utf-8\r\n\r\n");
+  mimehtml();
   svc(F(
     "<html><head><link rel=\"stylesheet\" href=\"/s.css\"></head><body>"
     "<h3>Sprinkler Main</h3>"
@@ -444,7 +450,18 @@ svc("Content-Type: text/html; charset=utf-8\r\n\r\n");
   svc(String(millis() / 1000) + " seconds<br>");
   for (int i = 0; i < MAX_ZONES; i++) {
     if (zones[i].pin != -1) {
-      svc(F("Zone ") + zones[i].name + F("<br>"));
+      svc(F("Zone ") + zones[i].name + " " + (zones[i].isOn ? F("<span class='stat on'>ON</span>") : F("<span class='stat off'>Off</span>")) + ' ';
+      svc(F("<form class=noblock action='/on' method='GET'>"));
+      svc(F("<input type='hidden' name='zone' value='") + String(i) + F("'>"));
+      svc(F(
+        "<input class='num' type='text' name='duration' value='30'> <input type='submit' value='On'>"
+        "</form>"
+        "<form class=noblock action='/off' method='GET'>"));
+      svc(F("<input type='hidden' name='zone' value='") + String(i) + F("'>"));
+      svc(F(
+        "<input type='submit' value='Off'>"
+        "</form><br>"
+      ));
       
       // Add preset buttons for each zone
       for (int j = 0; j < MAX_ZONE_PRESETS; j++) {
@@ -457,17 +474,6 @@ svc("Content-Type: text/html; charset=utf-8\r\n\r\n");
       }
       svc("<br>");
 
-      svc(F("<form class=noblock action='/on' method='GET'>"));
-      svc(F("<input type='hidden' name='zone' value='") + String(i) + F("'>"));
-      svc(F(
-        "<input class='num' type='text' name='duration' value='30'> <input type='submit' value='On'>"
-        "</form>"
-        "<form class=noblock action='/off' method='GET'>"));
-      svc(F("<input type='hidden' name='zone' value='") + String(i) + F("'>"));
-      svc(F(
-        "<input type='submit' value='Off'>"
-        "</form><br>"
-      ));
     }
   }
   svc(F(
@@ -478,6 +484,10 @@ svc("Content-Type: text/html; charset=utf-8\r\n\r\n");
   ));
 }
 
+void redir_zero() {
+  server.send(200, "text/html",
+    F("Done. Redirecting...<meta http-equiv='refresh' content='0; url=/' />"));
+}
 void redir_plain() {
   server.send(200, "text/html",
     F("Done. Redirecting...<meta http-equiv='refresh' content='1; url=/' />"));
@@ -491,7 +501,7 @@ void handleZoneOn() {
       zones[zone].isOn = true;
       zones[zone].endTime = millis() + duration;
       digitalWrite(zones[zone].pin, RELAY_ON_STATE);
-      redir_plain();
+      redir_zero();
     } else {
       server.send(400, "text/plain", "Invalid zone, duration, or zone not configured");
     }
@@ -506,7 +516,7 @@ void handleZoneOff() {
     if (zone >= 0 && zone < MAX_ZONES && zones[zone].pin != -1) {
       zones[zone].isOn = false;
       digitalWrite(zones[zone].pin, RELAY_OFF_STATE);
-      redir_plain();
+      redir_zero();
     } else {
       server.send(400, "text/plain", "Invalid zone or zone not configured");
     }
@@ -618,7 +628,7 @@ void loop() {
     for (int i = 0; i < MAX_ZONES; i++) {
       if (zones[i].isOn && millis() >= zones[i].endTime) {
         zones[i].isOn = false;
-        digitalWrite(zones[i].pin, RELAY_ON_STATE);
+        digitalWrite(zones[i].pin, RELAY_OFF_STATE);
         spl("Zone " + String(i) + " turned off");
       }
     }
