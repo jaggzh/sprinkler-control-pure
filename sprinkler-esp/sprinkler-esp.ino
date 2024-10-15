@@ -33,6 +33,31 @@ WiFiManagerParameter custom_ip("ip", "Static IP", static_ip, 16);
 WiFiManagerParameter custom_gw("gw", "Gateway", static_gw, 16);
 WiFiManagerParameter custom_sn("sn", "Subnet Mask", static_sn, 16);
 
+
+/* void loadNetworkConfiguration(); */
+/* void loadZoneConfiguration(); */
+/* String readFromFile(const char* filename); */
+/* void startWiFiManager(); */
+/* void handleRootPage(); */
+/* void handleCSS(); */
+/* void handleZoneOn(); */
+/* void handleZoneOff(); */
+/* void handleReboot(); */
+/* void handleConfigPage(); */
+/* void handleConfigNet(); */
+/* void handleConfigZones(); */
+/* void handleStoreConfig(); */
+/* void handleWipeZones(); */
+/* void update_time_from_server(); */
+/* void saveNetworkConfiguration(); */
+/* void redir_plain(); */
+/* void http200(); */
+/* void mimehtml(); */
+/* void sp(const String &s); */
+/* void sp(int v); */
+/* void spl(const String &s); */
+/* void spl(int v); */
+
 #define svc(s) server.sendContent(s)
 void http200() { svc("HTTP/1.0 200 OK\r\n"); }
 void mimehtml() { http200(); svc("Content-Type: text/html; charset=utf-8\r\n\r\n"); }
@@ -424,19 +449,22 @@ void handleConfigZones() {
 void handleCSS() {
   server.send(200, "text/css", F(
     "@media (max-width: 1081px) {"
-      "body { font-size: 275%; }"
-      "input, button { font-size: 1em; }"
+      "body { font-size: 245%; }"
+      "input, button { font-size: 1em; padding: .05em .4em .05em .4em; }"
     "}"
+    "body { background: #bbb}"
     ".num{ width: 6em; }"
+    "form { margin: .1em 0 .1em 0; }"
+    ".zone { margin-top: .7em; padding: .1em .5em .1em .5em; border-top: 1px solid grey; border-bottom: 1px solid grey; border-collapse:collapse; }"
     ".noblock { display: inline-block; margin-right: .5em; }"
     "h3,h4,h5 { margin: .5em 0 .4em 0; }"
     ".zconf { padding-left: 2em; }"
     ".zconf div { margin: .1em 0 .1em 0; }"
     ".zconf div { margin: .1em 0 .1em 0; }"
     ".zconf input { width: 5em; }"
-    ".stat { padding: .2em .5em .2em .5em; }"
+    ".stat { padding: .05em .5em .05em .5em; }"
     ".on { background: red; color: white; }"
-    ".off { background: #aaa; color: black; }"
+    ".off { background: #99b; color: black; }"
   ));
 }
 
@@ -450,7 +478,7 @@ void handleRootPage() {
   svc(String(millis() / 1000) + " seconds<br>");
   for (int i = 0; i < MAX_ZONES; i++) {
     if (zones[i].pin != -1) {
-      svc(F("Zone ") + zones[i].name + " " + (zones[i].isOn ? F("<span class='stat on'>ON</span>") : F("<span class='stat off'>Off</span>")) + ' ';
+      svc(F("<div class='zone'>Zone ") + zones[i].name + " " + (zones[i].isOn ? F("<span class='stat on'>ON</span>") : F("<span class='stat off'>Off</span>")) + " ");
       svc(F("<form class=noblock action='/on' method='GET'>"));
       svc(F("<input type='hidden' name='zone' value='") + String(i) + F("'>"));
       svc(F(
@@ -472,7 +500,7 @@ void handleRootPage() {
           }
         }
       }
-      svc("<br>");
+      svc("</div>"); // /zone
 
     }
   }
