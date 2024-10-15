@@ -11,12 +11,15 @@ const char *timeServers[MAX_ZONES] = {"0.0.0.0", "0.0.0.0", "0.0.0.0", "0.0.0.0"
 char adminPassword[32] = "";
 struct timedata currentTimeData;
 bool wm_done=false;
+#define RELAY_ON_STATE  LOW
+#define RELAY_OFF_STATE HIGH
 
 struct Zone {
   int pin;
   unsigned long endTime;
   bool isOn;
   String name;
+  int preset[MAX_ZONE_PRESETS];  // Added preset array to store preset durations
 };
 
 Zone zones[MAX_ZONES];
@@ -45,6 +48,9 @@ void initZonesInMem() {
     zones[i].endTime = 0;
     zones[i].isOn = false;
     zones[i].name = "";
+    for (int j = 0; j < MAX_ZONE_PRESETS; j++) {
+      zones[i].preset[j] = -1;  // Default preset to -1 indicating unset
+    }
   }
 }
 
@@ -127,7 +133,7 @@ void setup() {
     for (int i = 0; i < MAX_ZONES; i++) {
       if (zones[i].pin != -1) {  // Only configure if pin is valid
         pinMode(zones[i].pin, OUTPUT);
-        digitalWrite(zones[i].pin, LOW);
+        digitalWrite(zones[i].pin, RELAY_OFF_STATE);
         zones[i].endTime = 0;
         zones[i].isOn = false;
         spl("Zone " + String(i) + " initialized on pin " + String(zones[i].pin));
@@ -272,6 +278,18 @@ void handleStoreConfig() {
         saveToFile(("/zone" + String(i) + "-pin").c_str(), String(pin));
         saveToFile(("/zone" + String(i) + "-name").c_str(), zoneName);
         spl("Zone " + String(i) + " configured with pin " + String(pin) + " and name " + zoneName);
+
+        // Save the presets
+        for (int j = 0; j < MAX_ZONE_PRESETS; j++) {
+          String presetParam = "zone" + String(i) + "_pset" + String(j);
+          if (server.hasArg(presetParam)) {
+            int presetValue = server.arg(presetParam).toInt();
+            zones[i].preset[j] = presetValue;
+
+            // Save each preset to LittleFS
+            saveToFile(("/zone" + String(i) + "_pset" + String(j)).c_str(), String(presetValue));
+          }
+        }
       }
     }
   }
@@ -339,12 +357,25 @@ void loadZoneConfiguration() {
     if (pinValue.length() > 0) {
       zones[i].pin = pinValue.toInt();
       zones[i].name = nameValue.length() > 0 ? nameValue : "Zone " + String(i);
+
+      // Load presets
+      for (int j = 0; j < MAX_ZONE_PRESETS; j++) {
+        String presetValue = readFromFile(("/zone" + String(i) + "_pset" + String(j)).c_str());
+        if (presetValue.length() > 0) {
+          zones[i].preset[j] = presetValue.toInt();
+        } else {
+          zones[i].preset[j] = -1;  // Default to -1 if not set
+        }
+      }
       spl("Loaded zone " + String(i) + " with pin " + String(zones[i].pin));
     } else {
-      zones[i].pin = -1;  // Invalid pin to indicate no configuration
+      zones[i].pin = -1;
       zones[i].name = "";
       zones[i].isOn = false;
       zones[i].endTime = 0;
+      for (int j = 0; j < MAX_ZONE_PRESETS; j++) {
+        zones[i].preset[j] = -1;  // Default presets to -1
+      }
       spl("Set zone " + String(i) + " to -1");
     }
   }
@@ -354,13 +385,15 @@ void handleConfigZones() {
   mimehtml();
   svc(F(
     "<html><head><link rel=\"stylesheet\" href=\"/s.css\"></head><body>"
+    "<p>[ <a href='/'>Home</a> ]</p>"
     "<form action='/store' method='GET'>"
     "<h3>Configure Sprinkler Zones</h3>"
     "* Pin = -1 means zone unassigned"
     "<h4>Pin ref:</h4>"
     "<b>&nbsp; <b>I2C:</b> D1:5, D2:4<br />"
     "<b>&nbsp; <b>Preferred:</b> D4:2 (led), D5:14, D6:12, D7:13<br />"
-    "<h4>Zone config</h4>"));
+    "<h4>Zone config</h4>"
+  ));
   for (int i = 0; i < MAX_ZONES; i++) {
     svc(
       "<div class=zconf><h5>Zone " + String(i) + "</h5>\n"
@@ -383,7 +416,7 @@ void handleConfigZones() {
   svc(
     "<input type='submit' value='Save Zones'>"
     "</form>"
-    "<a href='/wipe_zones'>Wipe Zones</a>"
+    "<p><a href='/wipe_zones'>Wipe Zones</a></p>"
     "</html>"
   );
 }
@@ -395,6 +428,8 @@ void handleCSS() {
     "h3,h4,h5 { margin: .5em 0 .4em 0; }"
     ".zconf { padding-left: 2em; }"
     ".zconf div { margin: .1em 0 .1em 0; }"
+    ".zconf div { margin: .1em 0 .1em 0; }"
+    ".zconf input { width: 5em; }"
   ));
 }
 
@@ -410,6 +445,18 @@ svc("Content-Type: text/html; charset=utf-8\r\n\r\n");
   for (int i = 0; i < MAX_ZONES; i++) {
     if (zones[i].pin != -1) {
       svc(F("Zone ") + zones[i].name + F("<br>"));
+      
+      // Add preset buttons for each zone
+      for (int j = 0; j < MAX_ZONE_PRESETS; j++) {
+        if (zones[i].preset[j] != -1) {
+          svc("<a href='/on?zone=" + String(i) + "&duration=" + String(zones[i].preset[j]) + "'>" + String(zones[i].preset[j]) + "s</a> ");
+          if (j < MAX_ZONE_PRESETS - 1) {
+            svc("| ");
+          }
+        }
+      }
+      svc("<br>");
+
       svc(F("<form class=noblock action='/on' method='GET'>"));
       svc(F("<input type='hidden' name='zone' value='") + String(i) + F("'>"));
       svc(F(
@@ -433,7 +480,7 @@ svc("Content-Type: text/html; charset=utf-8\r\n\r\n");
 
 void redir_plain() {
   server.send(200, "text/html",
-    F("Done. Redirecting...<meta http-equiv='refresh' content='3; url=/' />"));
+    F("Done. Redirecting...<meta http-equiv='refresh' content='1; url=/' />"));
 }
 
 void handleZoneOn() {
@@ -443,7 +490,7 @@ void handleZoneOn() {
     if (zone >= 0 && zone < MAX_ZONES && duration > 0 && zones[zone].pin != -1) {
       zones[zone].isOn = true;
       zones[zone].endTime = millis() + duration;
-      digitalWrite(zones[zone].pin, HIGH);
+      digitalWrite(zones[zone].pin, RELAY_ON_STATE);
       redir_plain();
     } else {
       server.send(400, "text/plain", "Invalid zone, duration, or zone not configured");
@@ -458,7 +505,7 @@ void handleZoneOff() {
     int zone = server.arg("zone").toInt();
     if (zone >= 0 && zone < MAX_ZONES && zones[zone].pin != -1) {
       zones[zone].isOn = false;
-      digitalWrite(zones[zone].pin, LOW);
+      digitalWrite(zones[zone].pin, RELAY_OFF_STATE);
       redir_plain();
     } else {
       server.send(400, "text/plain", "Invalid zone or zone not configured");
@@ -479,7 +526,7 @@ void handleConfigPage() {
     String providedPassword = server.arg("pw");
     if (strcmp(adminPassword, providedPassword.c_str()) == 0) {
       String content =
-        "<html><form action='/config_net' method='GET'>\n" +
+        String("<html><form action='/config_net' method='GET'>\n") +
         "SSID: <input type='text' name='ssid' value='" + WiFi.SSID() + "'><br>" +
         "SSID PW: <input type='password' name='ssid_pw' value='***'><br>" +
         "IP: <input type='text' name='ip' value='" + WiFi.localIP().toString() + "'><br>" +
@@ -489,7 +536,7 @@ void handleConfigPage() {
         content += "Time server IP " + String(i) + ": <input type='text' name='time_server_" + String(i) + "' value='" + String(timeServers[i]) + "'><br>";
       }
       content +=
-        "<input type='submit' value='Submit'>" +
+        "<input type='submit' value='Submit'>"
         "</form></html>";
       server.send(200, "text/html", content);
     } else {
@@ -571,7 +618,7 @@ void loop() {
     for (int i = 0; i < MAX_ZONES; i++) {
       if (zones[i].isOn && millis() >= zones[i].endTime) {
         zones[i].isOn = false;
-        digitalWrite(zones[i].pin, LOW);
+        digitalWrite(zones[i].pin, RELAY_ON_STATE);
         spl("Zone " + String(i) + " turned off");
       }
     }
